@@ -109,7 +109,7 @@ jobs:
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER=""
 
-      - name: Package unsigned IPA
+      - name: Package strictly unsigned Payload-only IPA
         working-directory: element-ios
         run: |
           APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
@@ -119,27 +119,75 @@ jobs:
             exit 1
           fi
 
-          rm -rf build/Payload build/$IPA_NAME build/codesign-check.txt
+          rm -rf build/Payload build/$IPA_NAME build/unsigned-clean-report.txt
           mkdir -p build/Payload
           cp -R "$APP_PATH" build/Payload/
 
+          # Third-party signers are often fragile around nested app extensions.
+          # Keep the IPA Payload-only and app-only, matching the clean reference package style.
+          rm -rf build/Payload/*.app/PlugIns
+          rm -rf build/Payload/*.app/Watch
+          rm -rf build/Payload/*.app/SC_Info
+
+          # Remove every signing/provisioning remnant recursively.
           find build/Payload -name _CodeSignature -type d -prune -exec rm -rf {} +
           find build/Payload -name embedded.mobileprovision -type f -delete
           find build/Payload -name CodeResources -type f -delete
+          find build/Payload -name '*.xcent' -type f -delete
+          find build/Payload -name '*.entitlements' -type f -delete
 
-          set +e
-          codesign -dv build/Payload/*.app > build/codesign-check.txt 2>&1
-          CODE_SIGN_STATUS=$?
-          set -e
-          cat build/codesign-check.txt
-          if [ "$CODE_SIGN_STATUS" -eq 0 ]; then
-            echo "The app still appears to be signed. Refusing to upload a signed IPA." >&2
+          {
+            echo "Unsigned clean report"
+            echo "Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "App path: $APP_PATH"
+            echo
+            echo "Top-level IPA entries: Payload only"
+            echo
+            echo "Signature file remnants:"
+            find build/Payload \( -name _CodeSignature -o -name embedded.mobileprovision -o -name CodeResources -o -name '*.xcent' -o -name '*.entitlements' \) -print
+            echo
+            echo "codesign checks:"
+          } > build/unsigned-clean-report.txt
+
+          SIGNED_FOUND=0
+          while IFS= read -r bundle; do
+            set +e
+            codesign -dv "$bundle" >> build/unsigned-clean-report.txt 2>&1
+            CODE_SIGN_STATUS=$?
+            set -e
+            if [ "$CODE_SIGN_STATUS" -eq 0 ]; then
+              echo "SIGNED_BUNDLE: $bundle" | tee -a build/unsigned-clean-report.txt >&2
+              SIGNED_FOUND=1
+            else
+              echo "UNSIGNED_BUNDLE_OK: $bundle" >> build/unsigned-clean-report.txt
+            fi
+          done < <(find build/Payload -type d \( -name '*.app' -o -name '*.framework' -o -name '*.bundle' \) | sort)
+
+          echo >> build/unsigned-clean-report.txt
+          echo "Mach-O LC_CODE_SIGNATURE checks:" >> build/unsigned-clean-report.txt
+          while IFS= read -r binary; do
+            if otool -l "$binary" 2>/dev/null | grep -q LC_CODE_SIGNATURE; then
+              echo "SIGNED_MACHO: $binary" | tee -a build/unsigned-clean-report.txt >&2
+              SIGNED_FOUND=1
+            else
+              echo "UNSIGNED_MACHO_OK: $binary" >> build/unsigned-clean-report.txt
+            fi
+          done < <(find build/Payload -type f -print0 | xargs -0 file | awk -F: '/Mach-O/ {print $1}' | sort)
+
+          if [ "$SIGNED_FOUND" -ne 0 ]; then
+            echo "A signing remnant was found. Refusing to upload." >&2
+            exit 1
+          fi
+
+          if find build/Payload \( -name _CodeSignature -o -name embedded.mobileprovision -o -name CodeResources -o -name '*.xcent' -o -name '*.entitlements' \) -print -quit | grep -q .; then
+            echo "Signing/provisioning files still exist. Refusing to upload." >&2
             exit 1
           fi
 
           cd build
-          zip -qry "$IPA_NAME" Payload codesign-check.txt
+          zip -qry "$IPA_NAME" Payload
           shasum -a 256 "$IPA_NAME" | tee "$IPA_NAME.sha256"
+          cat unsigned-clean-report.txt
 
       - name: Upload unsigned IPA artifact
         uses: actions/upload-artifact@v4
@@ -148,5 +196,6 @@ jobs:
           path: |
             element-ios/build/${{ env.IPA_NAME }}
             element-ios/build/${{ env.IPA_NAME }}.sha256
+            element-ios/build/unsigned-clean-report.txt
           if-no-files-found: error
           retention-days: 14
