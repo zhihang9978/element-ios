@@ -29,6 +29,12 @@ def replace_regex(text: str, pattern: str, replacement: str, label: str, flags: 
     return new_text
 
 
+def replace_literal(text: str, old: str, new: str, label: str) -> str:
+    if old not in text:
+        raise RuntimeError(f"Could not patch {label}")
+    return text.replace(old, new, 1)
+
+
 def patch_build_settings() -> None:
     path = ROOT / "Config" / "BuildSettings.swift"
     text = read(path)
@@ -163,17 +169,66 @@ def patch_language() -> None:
         write(app_delegate, text)
 
 
+def patch_third_party_signing_runtime() -> None:
+    """Avoid runtime entitlements that third-party signing services usually cannot provide."""
+    replacements = {
+        ROOT / "Riot" / "Managers" / "EncryptionKeyManager" / "EncryptionKeyManager.swift": [
+            (
+                "KeychainStore(withKeychain: Keychain(service: keychainService, accessGroup: BuildSettings.keychainAccessGroup))",
+                "KeychainStore(withKeychain: Keychain(service: keychainService))",
+                "encryption keychain access group",
+            ),
+        ],
+        ROOT / "Riot" / "Managers" / "PushNotification" / "PushNotificationStore.swift": [
+            (
+                "KeychainStore(withKeychain: Keychain(service: PushNotificationConstants.pushNotificationKeychainService,\n                                                     accessGroup: BuildSettings.keychainAccessGroup))",
+                "KeychainStore(withKeychain: Keychain(service: PushNotificationConstants.pushNotificationKeychainService))",
+                "push notification keychain access group",
+            ),
+        ],
+        ROOT / "Riot" / "Modules" / "SetPinCode" / "PinCodePreferences.swift": [
+            (
+                "KeychainStore(withKeychain: Keychain(service: PinConstants.pinCodeKeychainService,\n                                                     accessGroup: BuildSettings.keychainAccessGroup))",
+                "KeychainStore(withKeychain: Keychain(service: PinConstants.pinCodeKeychainService))",
+                "pin keychain access group",
+            ),
+        ],
+        ROOT / "Riot" / "Managers" / "Settings" / "RiotSettings.swift": [
+            (
+                "static var defaults: UserDefaults = {\n        guard let userDefaults = UserDefaults(suiteName: BuildSettings.applicationGroupIdentifier) else {\n            fatalError(\"[RiotSettings] Fail to load shared UserDefaults\")\n        }\n        return userDefaults\n    }()",
+                "static var defaults: UserDefaults = {\n        UserDefaults(suiteName: BuildSettings.applicationGroupIdentifier) ?? UserDefaults.standard\n    }()",
+                "RiotSettings app group fallback",
+            ),
+        ],
+        ROOT / "Riot" / "Modules" / "MatrixKit" / "Models" / "MXKAppSettings.m": [
+            (
+                "sharedUserDefaults = [[NSUserDefaults alloc] initWithSuiteName:_currentApplicationGroup];",
+                "sharedUserDefaults = [[NSUserDefaults alloc] initWithSuiteName:_currentApplicationGroup];\n        if (!sharedUserDefaults)\n        {\n            sharedUserDefaults = [NSUserDefaults standardUserDefaults];\n        }",
+                "MatrixKit shared defaults fallback",
+            ),
+        ],
+    }
+
+    for path, path_replacements in replacements.items():
+        text = read(path)
+        for old, new, label in path_replacements:
+            text = replace_literal(text, old, new, label)
+        write(path, text)
+
+
 def main() -> None:
     if not ROOT.exists():
         raise SystemExit(f"Element iOS directory not found: {ROOT}")
     patch_build_settings()
     patch_app_identifiers()
     patch_language()
+    patch_third_party_signing_runtime()
     print("Patched Element iOS for Vudo")
     print(f"Homeserver: {HOMESERVER}")
     print(f"Permalink: {WEB_URL}")
     print(f"Bundle ID: {BASE_BUNDLE_ID}")
     print(f"Language: {LANGUAGE}")
+    print("Third-party signing runtime: default keychain groups and app-group fallbacks enabled")
 
 
 if __name__ == "__main__":
