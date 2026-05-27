@@ -45,6 +45,11 @@ jobs:
           ruby --version
           git --version
 
+      - name: Configure GitHub HTTPS submodules
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+
       - name: Clone Element Classic iOS
         run: |
           git clone --recursive --depth 1 --branch "$ELEMENT_REF" https://github.com/element-hq/element-ios.git element-ios
