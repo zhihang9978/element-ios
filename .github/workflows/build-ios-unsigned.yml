@@ -1,0 +1,144 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      element_ref:
+        description: Element Classic iOS branch or tag to build
+        required: true
+        default: master
+      artifact_name:
+        description: Artifact name shown in GitHub Actions
+        required: true
+        default: Vudo-unsigned-ipa
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - .github/workflows/build-ios-unsigned.yml
+      - scripts/patch_element_ios.py
+      - README.md
+
+permissions:
+  contents: read
+
+env:
+  ELEMENT_REF: ${{ github.event.inputs.element_ref || 'master' }}
+  ARTIFACT_NAME: ${{ github.event.inputs.artifact_name || 'Vudo-unsigned-ipa' }}
+  IPA_NAME: Vudo-unsigned.ipa
+
+jobs:
+  build:
+    name: Build unsigned IPA on macOS
+    runs-on: macos-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout build repo
+        uses: actions/checkout@v6
+
+      - name: Show runner tools
+        run: |
+          sw_vers
+          xcodebuild -version
+          ruby --version
+          git --version
+
+      - name: Clone Element Classic iOS
+        run: |
+          git clone --recursive --depth 1 --branch "$ELEMENT_REF" https://github.com/element-hq/element-ios.git element-ios
+          cd element-ios
+          git rev-parse --short HEAD
+
+      - name: Patch Element iOS configuration
+        run: |
+          python3 scripts/patch_element_ios.py
+          grep -n "matrix.vudo-app.top\|element.vudo-app.top\|authScreenShowCustomServerOptions\|replacementApp" element-ios/Config/BuildSettings.swift
+          grep -n "BUNDLE_DISPLAY_NAME\|BASE_BUNDLE_IDENTIFIER\|APPLICATION_GROUP_IDENTIFIER\|APPLICATION_SCHEME\|DEVELOPMENT_TEAM" element-ios/Config/AppIdentifiers.xcconfig
+
+      - name: Install build tools
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          gem install cocoapods -v 1.16.2 --no-document
+
+      - name: Generate Xcode project and install pods
+        working-directory: element-ios
+        run: |
+          rm -rf Riot.xcodeproj Riot.xcworkspace Pods
+          xcodegen
+          pod install --repo-update
+          xcodebuild -list -workspace Riot.xcworkspace
+
+      - name: Resolve Swift packages
+        working-directory: element-ios
+        run: |
+          xcodebuild \
+            -resolvePackageDependencies \
+            -workspace Riot.xcworkspace \
+            -scheme Riot \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -skipPackagePluginValidation \
+            -skipMacroValidation
+
+      - name: Build unsigned app
+        working-directory: element-ios
+        run: |
+          xcodebuild \
+            -workspace Riot.xcworkspace \
+            -scheme Riot \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            clean build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      - name: Package unsigned IPA
+        working-directory: element-ios
+        run: |
+          APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app was produced" >&2
+            find build/DerivedData/Build/Products -maxdepth 3 -type d -name "*.app" -print >&2 || true
+            exit 1
+          fi
+
+          rm -rf build/Payload build/$IPA_NAME build/codesign-check.txt
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" build/Payload/
+
+          find build/Payload -name _CodeSignature -type d -prune -exec rm -rf {} +
+          find build/Payload -name embedded.mobileprovision -type f -delete
+          find build/Payload -name CodeResources -type f -delete
+
+          set +e
+          codesign -dv build/Payload/*.app > build/codesign-check.txt 2>&1
+          CODE_SIGN_STATUS=$?
+          set -e
+          cat build/codesign-check.txt
+          if [ "$CODE_SIGN_STATUS" -eq 0 ]; then
+            echo "The app still appears to be signed. Refusing to upload a signed IPA." >&2
+            exit 1
+          fi
+
+          cd build
+          zip -qry "$IPA_NAME" Payload codesign-check.txt
+          shasum -a 256 "$IPA_NAME" | tee "$IPA_NAME.sha256"
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            element-ios/build/${{ env.IPA_NAME }}
+            element-ios/build/${{ env.IPA_NAME }}.sha256
+          if-no-files-found: error
+          retention-days: 14
