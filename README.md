@@ -5,5 +5,6 @@ This repository builds a customized unsigned IPA from Element Classic iOS using 
 - Homeserver: https://matrix.vudo-app.top
 - Web permalink: https://element.vudo-app.top
 - Output: unsigned IPA for third-party signing
+- Signing: disabled during build; final IPA is intended for third-party signing
 
 Run **Actions -> Build unsigned iOS IPA -> Run workflow** to build.
