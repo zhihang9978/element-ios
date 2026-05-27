@@ -9,7 +9,7 @@ SERVER_NAME = "matrix.vudo-app.top"
 WEB_URL = "https://element.vudo-app.top"
 APP_NAME = "Vudo"
 BASE_BUNDLE_ID = "top.vudo.app"
-APP_GROUP_ID = "group.top.vudo.app"
+APP_GROUP_ID = ""
 APP_SCHEME = "vudo"
 LANGUAGE = "zh-Hans"
 
@@ -146,6 +146,19 @@ def patch_app_identifiers() -> None:
     write(path, text)
 
 
+def patch_project_keychain_group() -> None:
+    path = ROOT / "Config" / "Project.xcconfig"
+    text = read(path)
+    text = replace_regex(
+        text,
+        r'^KEYCHAIN_ACCESS_GROUP\s*=.*$',
+        'KEYCHAIN_ACCESS_GROUP =',
+        "project keychain access group",
+        flags=re.MULTILINE,
+    )
+    write(path, text)
+
+
 def patch_language() -> None:
     project_config = ROOT / "Config" / "Project.xcconfig"
     if project_config.exists():
@@ -221,6 +234,7 @@ def main() -> None:
         raise SystemExit(f"Element iOS directory not found: {ROOT}")
     patch_build_settings()
     patch_app_identifiers()
+    patch_project_keychain_group()
     patch_language()
     patch_third_party_signing_runtime()
     print("Patched Element iOS for Vudo")
@@ -228,7 +242,7 @@ def main() -> None:
     print(f"Permalink: {WEB_URL}")
     print(f"Bundle ID: {BASE_BUNDLE_ID}")
     print(f"Language: {LANGUAGE}")
-    print("Third-party signing runtime: default keychain groups and app-group fallbacks enabled")
+    print("Third-party signing runtime: custom app/keychain groups disabled")
 
 
 if __name__ == "__main__":
