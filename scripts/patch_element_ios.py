@@ -214,7 +214,6 @@ def patch_language() -> None:
 def patch_localized_strings() -> None:
     overrides = {
         "home_empty_view_information": "绽友是一款安全的一体化聊天应用。点击下方「+」按钮添加联系人和房间。",
-        "all_chats_empty_view_title": "%@\\n看起来有点空。",
         "all_chats_empty_view_information": "绽友是一款安全的一体化聊天应用。创建聊天或加入现有房间即可开始。",
         "all_chats_empty_space_information": "空间可以把房间和联系人分组。添加已有房间或创建新房间即可开始。",
         "all_chats_empty_list_placeholder_title": "您已处理完所有消息。",
