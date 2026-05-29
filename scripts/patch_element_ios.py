@@ -501,7 +501,6 @@ def patch_localized_strings() -> None:
         "spaces_creation_post_process_creating_room": "正在创建 %@",
         "spaces_creation_post_process_adding_rooms": "正在添加 %@ 个房间",
         "spaces_creation_post_process_inviting_users": "正在邀请 %@ 个用户",
-        "space_settings_current_address_message": "这个空间可通过以下地址访问\\n%@",
         "leave_space_action": "离开空间",
         "leave_space_and_one_room": "离开空间和 1 个房间",
         "leave_space_and_more_rooms": "离开空间和 %@ 个房间",
