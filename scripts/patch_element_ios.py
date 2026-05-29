@@ -17,6 +17,7 @@ APP_GROUP_ID = ""
 APP_SCHEME = "zhanyou"
 LANGUAGE = "zh-Hans"
 ICON_SOURCE = BUILD_REPO_ROOT / "branding" / "zhan-you-icon-1024.png"
+ONBOARDING_ASSETS_DIR = BUILD_REPO_ROOT / "branding" / "onboarding"
 
 
 def read(path: Path) -> str:
@@ -40,6 +41,15 @@ def replace_literal(text: str, old: str, new: str, label: str) -> str:
     if new in text:
         return text
     raise RuntimeError(f"Could not patch {label}")
+
+
+def upsert_strings_key(text: str, key: str, value: str) -> str:
+    line = f'"{key}" = "{value}";'
+    pattern = rf'^{re.escape(chr(34) + key + chr(34))}\s*=\s*".*?";$'
+    new_text, count = re.subn(pattern, line, text, count=1, flags=re.MULTILINE)
+    if count:
+        return new_text
+    return text.rstrip() + "\n" + line + "\n"
 
 
 def patch_build_settings() -> None:
@@ -125,6 +135,13 @@ def patch_build_settings() -> None:
         "group room VoIP",
     )
 
+    text = replace_regex(
+        text,
+        r'static let roomScreenTimelineDefaultStyleIdentifier: RoomTimelineStyleIdentifier = \.(plain|bubble)',
+        'static let roomScreenTimelineDefaultStyleIdentifier: RoomTimelineStyleIdentifier = .bubble',
+        "default room timeline style",
+    )
+
     write(path, text)
 
 
@@ -181,12 +198,43 @@ def patch_language() -> None:
         insert = (
             marker
             + f"        UserDefaults.standard.set([\"{LANGUAGE}\"], forKey: \"AppleLanguages\")\n"
+            + "        if !UserDefaults.standard.bool(forKey: \"zhanyouDefaultSettingsApplied\") {\n"
+            + "            UserDefaults.standard.set(true, forKey: \"roomScreenEnableMessageBubbles\")\n"
+            + "            RiotSettings.defaults.set(true, forKey: \"roomScreenEnableMessageBubbles\")\n"
+            + "            UserDefaults.standard.set(true, forKey: \"zhanyouDefaultSettingsApplied\")\n"
+            + "        }\n"
             + "        UserDefaults.standard.synchronize()\n"
         )
         if marker not in text:
             raise RuntimeError("Could not locate AppDelegate willFinishLaunchingWithOptions")
         text = text.replace(marker, insert, 1)
         write(app_delegate, text)
+
+
+def patch_localized_strings() -> None:
+    overrides = {
+        "home_empty_view_information": "绽友是一款安全的一体化聊天应用。点击下方「+」按钮添加联系人和房间。",
+        "all_chats_empty_view_title": "%@\\n看起来有点空。",
+        "all_chats_empty_view_information": "绽友是一款安全的一体化聊天应用。创建聊天或加入现有房间即可开始。",
+        "all_chats_empty_space_information": "空间可以把房间和联系人分组。添加已有房间或创建新房间即可开始。",
+        "all_chats_empty_list_placeholder_title": "您已处理完所有消息。",
+        "all_chats_empty_unreads_placeholder_message": "有未读消息时会显示在这里。",
+        "onboarding_splash_page_1_title": "掌控您的对话。",
+        "onboarding_splash_page_1_message": "安全、独立的沟通方式，让您的交流像面对面一样私密。",
+        "onboarding_splash_page_2_title": "一切都在您的掌控中。",
+        "onboarding_splash_page_2_message": "选择在哪里保存您的对话，掌控自己的沟通与隐私。通过绽友连接。",
+        "onboarding_splash_page_3_title": "安全消息。",
+        "onboarding_splash_page_3_message": "端到端加密，无需手机号。没有广告，也不会挖掘您的数据。",
+        "onboarding_splash_page_4_title_no_pun": "为团队而生的消息工具。",
+        "onboarding_splash_page_4_message": "绽友同样适合团队协作，安全可靠，便于组织沟通。",
+    }
+
+    for language in ["zh_Hans", "en"]:
+        path = ROOT / "Riot" / "Assets" / f"{language}.lproj" / "Vector.strings"
+        text = read(path)
+        for key, value in overrides.items():
+            text = upsert_strings_key(text, key, value)
+        write(path, text)
 
 
 def icon_pixels(size: str, scale: str) -> int:
@@ -238,6 +286,86 @@ def patch_app_icon() -> None:
 
     print(f"App icon patched from {ICON_SOURCE}")
     print(f"App icon sets patched: {patched_dirs}, generated PNGs: {generated_files}")
+
+
+def copy_file(source: Path, destination: Path) -> None:
+    if not source.exists():
+        raise RuntimeError(f"Missing branding asset: {source}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(source.read_bytes())
+
+
+def write_asset_contents(path: Path, filename: str) -> None:
+    contents = {
+        "images": [
+            {
+                "filename": filename,
+                "idiom": "universal",
+                "scale": "1x",
+            }
+        ],
+        "info": {
+            "author": "xcode",
+            "version": 1,
+        },
+    }
+    path.write_text(json.dumps(contents, indent=2) + "\n", encoding="utf-8")
+
+
+def patch_brand_artwork() -> None:
+    if not ONBOARDING_ASSETS_DIR.exists():
+        raise RuntimeError(f"Brand artwork directory not found: {ONBOARDING_ASSETS_DIR}")
+
+    onboarding_targets = [
+        ("onboarding_splash_screen_page_1.imageset", "zhanyou_onboarding_splash_page_1.png"),
+        ("onboarding_splash_screen_page_1_dark.imageset", "zhanyou_onboarding_splash_page_1_dark.png"),
+        ("onboarding_splash_screen_page_2.imageset", "zhanyou_onboarding_splash_page_2.png"),
+        ("onboarding_splash_screen_page_2_dark.imageset", "zhanyou_onboarding_splash_page_2_dark.png"),
+        ("onboarding_splash_screen_page_3.imageset", "zhanyou_onboarding_splash_page_3.png"),
+        ("onboarding_splash_screen_page_3_dark.imageset", "zhanyou_onboarding_splash_page_3_dark.png"),
+        ("onboarding_splash_screen_page_4.imageset", "zhanyou_onboarding_splash_page_4.png"),
+        ("onboarding_splash_screen_page_4_dark.imageset", "zhanyou_onboarding_splash_page_4_dark.png"),
+    ]
+    for image_set, source_name in onboarding_targets:
+        image_set_dir = ROOT / "Riot" / "Assets" / "Images.xcassets" / "Onboarding" / image_set
+        copy_file(ONBOARDING_ASSETS_DIR / source_name, image_set_dir / source_name)
+        write_asset_contents(image_set_dir / "Contents.json", source_name)
+
+    empty_targets = [
+        (
+            "all_chats_empty_screen_artwork.imageset",
+            "zhanyou_all_chats_empty_screen_artwork",
+            "all_chats_empty_screen_artwork",
+        ),
+        (
+            "all_chats_empty_screen_artwork_dark.imageset",
+            "zhanyou_all_chats_empty_screen_artwork_dark",
+            "all_chats_empty_screen_artwork_dark",
+        ),
+    ]
+    for image_set, source_prefix, destination_prefix in empty_targets:
+        image_set_dir = ROOT / "Riot" / "Assets" / "Images.xcassets" / "Home" / image_set
+        for suffix in ["", "@2x", "@3x"]:
+            copy_file(
+                ONBOARDING_ASSETS_DIR / f"{source_prefix}{suffix}.png",
+                image_set_dir / f"{destination_prefix}{suffix}.png",
+            )
+
+    list_placeholder_dir = (
+        ROOT
+        / "Riot"
+        / "Assets"
+        / "Images.xcassets"
+        / "Home"
+        / "all_chats_empty_list_placeholder_icon.imageset"
+    )
+    copy_file(
+        ONBOARDING_ASSETS_DIR / "zhanyou_empty_list_placeholder_icon.png",
+        list_placeholder_dir / "zhanyou_empty_list_placeholder_icon.png",
+    )
+    write_asset_contents(list_placeholder_dir / "Contents.json", "zhanyou_empty_list_placeholder_icon.png")
+
+    print("Brand onboarding and empty-state artwork patched")
 
 
 def patch_third_party_signing_runtime() -> None:
@@ -294,7 +422,9 @@ def main() -> None:
     patch_app_identifiers()
     patch_project_keychain_group()
     patch_language()
+    patch_localized_strings()
     patch_app_icon()
+    patch_brand_artwork()
     patch_third_party_signing_runtime()
     print(f"Patched Element iOS for {APP_NAME}")
     print(f"Homeserver: {HOMESERVER}")
