@@ -78,7 +78,7 @@ jobs:
         run: |
           rm -rf Riot.xcodeproj Riot.xcworkspace Pods
           xcodegen
-          pod install --repo-update
+          COCOAPODS_DISABLE_STATS=1 pod install
           xcodebuild -list -workspace Riot.xcworkspace
 
       - name: Resolve Swift packages
