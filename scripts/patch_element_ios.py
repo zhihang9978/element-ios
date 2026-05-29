@@ -259,14 +259,7 @@ def patch_localized_strings() -> None:
     en_text = read(en_path)
     zh_text = read(zh_path)
     en_items = parse_strings(en_text)
-    zh_items = parse_strings(zh_text)
     base_keys = set(en_items)
-
-    # Some screens still fall back to en.lproj. Keep the file itself as a Chinese fallback
-    # by reusing official zh_Hans translations wherever they already exist.
-    for key, value in zh_items.items():
-        if key in base_keys:
-            en_text = upsert_strings_key(en_text, key, value)
 
     overrides = {
         "view": "查看",
