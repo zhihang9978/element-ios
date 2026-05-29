@@ -10,7 +10,7 @@ on:
       artifact_name:
         description: Artifact name shown in GitHub Actions
         required: true
-        default: Vudo-unsigned-ipa
+        default: Zhanyou-unsigned-ipa
   push:
     branches:
       - main
@@ -18,6 +18,7 @@ on:
     paths:
       - .github/workflows/build-ios-unsigned.yml
       - scripts/patch_element_ios.py
+      - branding/zhan-you-icon-1024.png
       - README.md
 
 permissions:
@@ -25,8 +26,8 @@ permissions:
 
 env:
   ELEMENT_REF: ${{ github.event.inputs.element_ref || 'master' }}
-  ARTIFACT_NAME: ${{ github.event.inputs.artifact_name || 'Vudo-unsigned-ipa' }}
-  IPA_NAME: Vudo-unsigned.ipa
+  ARTIFACT_NAME: ${{ github.event.inputs.artifact_name || 'Zhanyou-unsigned-ipa' }}
+  IPA_NAME: Zhanyou-unsigned.ipa
 
 jobs:
   build:
@@ -44,6 +45,7 @@ jobs:
           xcodebuild -version
           ruby --version
           git --version
+          sips --version
 
       - name: Configure GitHub HTTPS submodules
         run: |
@@ -62,8 +64,9 @@ jobs:
       - name: Patch Element iOS configuration
         run: |
           python3 scripts/patch_element_ios.py
-          grep -n "matrix.vudo-app.top\|element.vudo-app.top\|authScreenShowCustomServerOptions\|replacementApp" element-ios/Config/BuildSettings.swift
+          grep -n "matrix.xuyoxxx.com\|authScreenShowCustomServerOptions\|replacementApp\|roomScreenAllowVoIP" element-ios/Config/BuildSettings.swift
           grep -n "BUNDLE_DISPLAY_NAME\|BASE_BUNDLE_IDENTIFIER\|APPLICATION_GROUP_IDENTIFIER\|APPLICATION_SCHEME\|DEVELOPMENT_TEAM" element-ios/Config/AppIdentifiers.xcconfig
+          find element-ios/Riot/Assets/SharedImages.xcassets/AppIcon.appiconset -maxdepth 1 -name '*.png' | sort | head
 
       - name: Install build tools
         run: |

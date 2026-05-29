@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
+import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(os.environ.get("ELEMENT_IOS_DIR", "element-ios"))
-HOMESERVER = "https://matrix.vudo-app.top"
-SERVER_NAME = "matrix.vudo-app.top"
-WEB_URL = "https://element.vudo-app.top"
-APP_NAME = "Vudo"
-BASE_BUNDLE_ID = "top.vudo.app"
+BUILD_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+HOMESERVER = "https://matrix.xuyoxxx.com"
+SERVER_NAME = "matrix.xuyoxxx.com"
+WEB_URL = "https://matrix.xuyoxxx.com"
+APP_NAME = "绽友"
+BASE_BUNDLE_ID = "com.xuyoxxx.zhanyou"
 APP_GROUP_ID = ""
-APP_SCHEME = "vudo"
+APP_SCHEME = "zhanyou"
 LANGUAGE = "zh-Hans"
+ICON_SOURCE = BUILD_REPO_ROOT / "branding" / "zhan-you-icon-1024.png"
 
 
 def read(path: Path) -> str:
@@ -30,9 +35,11 @@ def replace_regex(text: str, pattern: str, replacement: str, label: str, flags: 
 
 
 def replace_literal(text: str, old: str, new: str, label: str) -> str:
-    if old not in text:
-        raise RuntimeError(f"Could not patch {label}")
-    return text.replace(old, new, 1)
+    if old in text:
+        return text.replace(old, new, 1)
+    if new in text:
+        return text
+    raise RuntimeError(f"Could not patch {label}")
 
 
 def patch_build_settings() -> None:
@@ -78,7 +85,7 @@ def patch_build_settings() -> None:
     text = replace_regex(
         text,
         r'static let stunServerFallbackUrlString: String\? = "[^"]+"',
-        'static let stunServerFallbackUrlString: String? = "stun:turn.vudo-app.top:3478"',
+        'static let stunServerFallbackUrlString: String? = "stun:matrix.xuyoxxx.com:3478"',
         "STUN fallback",
     )
 
@@ -182,6 +189,57 @@ def patch_language() -> None:
         write(app_delegate, text)
 
 
+def icon_pixels(size: str, scale: str) -> int:
+    width = float(size.split("x", 1)[0])
+    multiplier = int(scale.rstrip("x"))
+    return round(width * multiplier)
+
+
+def resize_icon(source: Path, destination: Path, pixels: int) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["sips", "-z", str(pixels), str(pixels), str(source), "--out", str(destination)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def patch_app_icon() -> None:
+    if not ICON_SOURCE.exists():
+        raise RuntimeError(f"Brand icon not found: {ICON_SOURCE}")
+
+    app_icon_dirs = [
+        ROOT / "Riot" / "Assets" / "SharedImages.xcassets" / "AppIcon.appiconset",
+        ROOT / "Variants" / "Alpha" / "Riot" / "Assets" / "SharedImages.xcassets" / "AppIcon.appiconset",
+    ]
+    patched_dirs = 0
+    generated_files = 0
+
+    for app_icon_dir in app_icon_dirs:
+        contents_json = app_icon_dir / "Contents.json"
+        if not contents_json.exists():
+            continue
+
+        contents = json.loads(read(contents_json))
+        for image in contents.get("images", []):
+            filename = image.get("filename")
+            size = image.get("size")
+            scale = image.get("scale")
+            if not filename or not size or not scale:
+                continue
+            pixels = icon_pixels(size, scale)
+            resize_icon(ICON_SOURCE, app_icon_dir / filename, pixels)
+            generated_files += 1
+        patched_dirs += 1
+
+    if patched_dirs == 0:
+        raise RuntimeError("Could not locate AppIcon.appiconset")
+
+    print(f"App icon patched from {ICON_SOURCE}")
+    print(f"App icon sets patched: {patched_dirs}, generated PNGs: {generated_files}")
+
+
 def patch_third_party_signing_runtime() -> None:
     """Avoid runtime entitlements that third-party signing services usually cannot provide."""
     replacements = {
@@ -236,8 +294,9 @@ def main() -> None:
     patch_app_identifiers()
     patch_project_keychain_group()
     patch_language()
+    patch_app_icon()
     patch_third_party_signing_runtime()
-    print("Patched Element iOS for Vudo")
+    print(f"Patched Element iOS for {APP_NAME}")
     print(f"Homeserver: {HOMESERVER}")
     print(f"Permalink: {WEB_URL}")
     print(f"Bundle ID: {BASE_BUNDLE_ID}")
